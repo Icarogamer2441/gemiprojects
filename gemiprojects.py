@@ -1,64 +1,93 @@
 import google.generativeai as genai
 import os
 
-API_KEY = "SUA_API_GEMINI"
+def main():
+    api_key = input("Digite sua chave de API do Google (Gemini): ")
+    genai.configure(api_key=api_key)
 
-genai.configure(api_key=API_KEY)
+    file_path = input("Digite o caminho do arquivo que deseja editar: ")
+    with open(file_path, "r") as f:
+        file_content = f.read()
 
-model = genai.GenerativeModel('gemini-1.5-flash')  # or gemini-1.5-pro
-chat = model.start_chat(history=[
-    {"role": "user", "parts": "você cria projetos e pode criar arquivos adicionar conteúdo em arquivos e criar pastas, esses são seus comandos que funcionam por que eu programei: crie arquivos usando '!create <filename> ```<content>```' e crie pastas usando '!folder <foldername>'. nota: o !create tambem serve para reescrever o conteudo de um arquivo"},
-    {"role": "model", "parts": "hello world em python: !create hello.py ```python\nprint(\"Hello world!\")\n```"}
-])
+    model = genai.GenerativeModel('gemini-pro')
+    chat = model.start_chat(history=[])
 
-def tokenize_code(response_text):
-    tokens = []
-    i = 0
-    while i < len(response_text):
-        if response_text[i] in [' ', '\n']:
-            i += 1
-            continue
-        if response_text[i:i+7] == '!create':
-            tokens.append('!create')
-            i += 7
-        elif response_text[i:i+7] == '!folder':
-            tokens.append('!folder')
-            i += 7
-        elif response_text[i:i+3] == '```':
-            i += 3  # Skip the opening ```
-            code_start = i
-            while i < len(response_text) and response_text[i:i+3] != '```':
-                i += 1
-            code = response_text[code_start:i]
-            tokens.append(code.strip())  # Strip leading/trailing whitespace
-            i += 3  # Skip the closing ```
-        else:
-            start = i
-            while i < len(response_text) and response_text[i] not in [' ', '\n']:
-                i += 1
-            tokens.append(response_text[start:i])
-    return tokens
+    instructions = f"""
+    Você é um assistente de programação. Estamos trabalhando no arquivo {file_path}.
+    O conteúdo atual do arquivo é:
 
-while True:
-    question = input("Question > ")
-    if question == "exit":
-        break
-    response = chat.send_message(question)
-    tokens = tokenize_code(response.text)
+    ```
+    {file_content}
+    ```
 
-    i = 0
-    while i < len(tokens):
-        if tokens[i] == "!create":
-            filename = tokens[i+1]
-            with open(filename, "w") as f:
-                if i+2 < len(tokens):
-                    code = tokens[i+2]
-                    f.write(code)
-            i += 3
-        elif tokens[i] == "!folder":
-            os.mkdir(tokens[i+1])
-            i += 2
-        else:
-            i += 1
+    Importante: Realize apenas uma ação por vez. Espere a confirmação do usuário antes de prosseguir para a próxima ação.
 
-    print(response.text)
+    Quando eu pedir para adicionar ou remover código, use o seguinte formato:
+
+    Para adicionar código ao final do arquivo, use:
+    **Adicionar:**
+    código: <código a ser adicionado>
+
+    Para remover código, use:
+    **Remover:**
+    linha: <número da linha a ser removida>
+
+    O código pode ter múltiplas linhas após o "código:". Não é recomendado usar ``` e você nunca pode usar.
+    Não adicione nenhuma mensagem após o código.
+
+    Lembre-se de sempre usar o formato correto e não usar **Adicionar** ou **Remover** toda vez que for adicionar ou remover código, use apenas
+    "codigo:" uma vez para adicionar, e "linha:" para cada linha que deseja remover. Você só pode usar ou **Adicionar** ou **Remover** de cada vez, não pode usar os dois ou os mesmo mais de uma vez.
+
+    Importante: Se for usar **Remover:**, você deve usar apenas "linha:" para cada linha que deseja remover. Por exemplo:
+    **Remover:**
+    linha: 5
+    linha: 6
+    linha: 7
+
+    Se for usar o **Adicionar:**, você deve usar apenas "código:" para adicionar o código ao final do arquivo.
+    """
+
+    chat.send_message(instructions)
+    print("Assistente: Olá! Estou pronto para ajudar com o arquivo. O que você gostaria de fazer? Lembre-se, farei uma ação de cada vez.")
+
+    while True:
+        user_input = input("Você: ")
+        if user_input.lower() == 'sair':
+            break
+
+        response = chat.send_message(user_input)
+        print("Assistente:", response.text)
+
+        if "linha:" in response.text or "código:" in response.text:
+            action_description = response.text.split("\n")[0].strip()
+            print(f"Ação a ser realizada: {action_description}")
+
+            lines_to_remove = []
+            code_to_add = ""
+            for line in response.text.split("\n"):
+                if line.startswith("linha:"):
+                    line_number = int(line.split("linha:")[1].strip())
+                    lines_to_remove.append(line_number)
+                elif line.startswith("código:"):
+                    code_to_add = "\n".join(response.text.split("código:")[1].strip().split("\n"))
+
+            with open(file_path, "r") as f:
+                lines = f.readlines()
+            
+            if "**Adicionar:**" in action_description:
+                new_lines = lines + ["\n" + code_to_add + "\n"]
+                print("Código adicionado ao final do arquivo")
+            elif "**Remover:**" in action_description:
+                new_lines = [line for i, line in enumerate(lines, 1) if i not in lines_to_remove]
+                print(f"Código removido das linhas {', '.join(map(str, lines_to_remove))}")
+            
+            with open(file_path, "w") as f:
+                f.writelines(new_lines)
+
+            with open(file_path, "r") as f:
+                file_content = f.read()
+            update_message = f"O arquivo foi atualizado. O novo conteúdo é:\n\n```\n{file_content}\n```\nVocê gostaria de fazer mais alguma alteração?"
+            chat.send_message(update_message)
+
+if __name__ == "__main__":
+    main()
